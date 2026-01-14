@@ -10,13 +10,11 @@ export default async ({ req, res }) => {
 
   const data = JSON.parse(req.body);
 
-  const {
-    status,
-    createdBy,
-    approvedBy
-  } = data;
+  const { status, createdBy, approvedBy } = data;
 
-  // 1️⃣ approvedBy must exist when approving
+  // -------------------------------
+  // 1️⃣ BASIC VALIDATION
+  // -------------------------------
   if (status === "approved" && !approvedBy) {
     return res.json(
       { error: "approvedBy is required when status is approved" },
@@ -24,7 +22,6 @@ export default async ({ req, res }) => {
     );
   }
 
-  // 2️⃣ Prevent self-approval
   if (status === "approved" && approvedBy === createdBy) {
     return res.json(
       { error: "Self-approval is not allowed" },
@@ -32,13 +29,42 @@ export default async ({ req, res }) => {
     );
   }
 
-  // Save document
-  const document = await databases.createDocument(
+  // -------------------------------
+  // 2️⃣ FETCH APPROVER ROLE (SAFE)
+  // -------------------------------
+  const staffResult = await databases.listDocuments(
     process.env.DB_ID,
-    process.env.COLLECTION_ID,
-    "unique()",
-    data
+    "staff",
+    [
+      // approvedBy is an Auth userId
+      // staff.userId stores auth userId
+      { equal: ["userId", approvedBy] }
+    ]
   );
 
-  return res.json(document);
+  if (staffResult.total === 0) {
+    return res.json(
+      { error: "Approver staff record not found" },
+      404
+    );
+  }
+
+  const approverRole = staffResult.documents[0].role;
+
+  // -------------------------------
+  // 3️⃣ ROLE VALIDATION
+  // -------------------------------
+  if (status === "approved" && !["manager", "admin"].includes(approverRole)) {
+    return res.json(
+      { error: "Only managers or admins can approve schedules" },
+      403
+    );
+  }
+
+  // -------------------------------
+  // 4️⃣ WRITE TO DATABASE
+  // -------------------------------
+  // create or update staff_shift_assignments here
+
+  return res.json({ success: true });
 };
